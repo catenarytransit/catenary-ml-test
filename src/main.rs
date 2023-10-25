@@ -199,7 +199,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         main_df = snapshot(&mut trd, main_df, &mut stop_locs, &stop_times, &content).await?;
         main_df.extend(&mut trd.to_dataframe().unwrap())?;
 
-        let file = File::create("training/training3.csv")?;
+        let file = File::create("../training/one_hour_data.csv")?;
         let mut training_csv = CsvWriter::new(&file)
             .has_header(true)
             .with_delimiter(b',');
@@ -284,8 +284,8 @@ async fn snapshot(
                                             .and(col("actual_arrival_time").eq(lit(Null {})))
                                     )
                                         .then(lit(timestamp_seconds.unwrap()))  // final actual arrival time propogate immediately to all previous null value of this vehID
-                                        // .when(col("vehicle_id").eq(lit(vehicle_descrp.id.as_ref().unwrap().parse::<f32>().unwrap())))
-                                        // .then(col("actual_arrival_time")+lit(1.0))  // testing out mutation
+                                        .when(col("vehicle_id").eq(lit(vehicle_descrp.id.as_ref().unwrap().parse::<f32>().unwrap())))
+                                        .then(col("actual_arrival_time")+lit(1.0))  // store the previous arrival time
                                         .otherwise(col("actual_arrival_time"))  // do nothing
                                         .alias("actual_arrival_time")
                                 )
