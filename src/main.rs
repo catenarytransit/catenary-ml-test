@@ -94,8 +94,7 @@ struct TrainingRowData {
     stop_lat: Vec<f32>,
     stop_lon: Vec<f32>,
     arrival_time: Vec<f32>,
-
-    actual_arrival_time: Vec<f32>,  // TODO: currently just represents the current status of the vehicle
+    actual_arrival_time: Vec<Option<f32>>,  // TODO: currently just represents the current status of the vehicle
 }
 
 impl TrainingRowData {
@@ -174,14 +173,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // training_csv.finish(&mut df)?;
     // println!("DF2 {:?}", df);
 
-    let file = File::create("training/training2.csv")?;
-    let mut training_csv = CsvWriter::new(file)
-        .has_header(true)
-        .with_delimiter(b',');
-
     let mut main_df = TrainingRowData::dataframe_empty()?;
-    training_csv.finish(&mut main_df)?;
-    training_csv = training_csv.has_header(false);
     let mut trd = TrainingRowData::default();
 
     let mut stop_locs = csv::Reader::from_path("gtfs_static/la_bus/stops.txt")?;
@@ -204,8 +196,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         };
         let content = gtfs_rt::FeedMessage::decode(bytes.as_slice())?;
 
-        snapshot(&mut trd, &mut stop_locs, &stop_times, &content).await?;
+        main_df = snapshot(&mut trd, main_df, &mut stop_locs, &stop_times, &content).await?;
         main_df.extend(&mut trd.to_dataframe().unwrap())?;
+
+        let file = File::create("training/training3.csv")?;
+        let mut training_csv = CsvWriter::new(&file)
+            .has_header(true)
+            .with_delimiter(b',');
         training_csv.finish(&mut main_df)?;
         trd.clear();
         println!("SNAPSHOT END");
@@ -213,9 +210,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 async fn snapshot(
-    trd: &mut TrainingRowData, stop_locs: &mut Reader<File>,
-    stop_times: &HashMap<String, Vec<(String, String)>>, content: &gtfs_rt::FeedMessage
-) -> Result<(), Box<dyn std::error::Error>> {
+    trd: &mut TrainingRowData, mut main_df: DataFrame,
+    stop_locs: &mut Reader<File>, stop_times: &HashMap<String, Vec<(String, String)>>, content: &gtfs_rt::FeedMessage
+) -> Result<DataFrame, Box<dyn std::error::Error>> {
     // ALL AGENCY ACCESS-POINT OVERVIEW: https://kactus.catenarymaps.org/gtfsrttimes
 
     // println!("{:?}", content);
@@ -223,11 +220,11 @@ async fn snapshot(
         if let Some(ref vehicle) = ent.vehicle {
             if let Some(ref vehicle_descrp) = vehicle.vehicle {
                 if let Some(ref position) = vehicle.position {
-                    let mut arrival_seconds = None;
+                    let mut timestamp_seconds = None;
                     if let Some(timestamp) = vehicle.timestamp {
                         let unix_date = DateTime::from_timestamp(timestamp as i64, 0).unwrap();
                         let tz_date = unix_date.with_timezone(&FixedOffset::east_opt(tz_ofs::PDT as i32).unwrap());
-                        arrival_seconds = Some(tz_date.num_seconds_from_midnight() as f32);
+                        timestamp_seconds = Some(tz_date.num_seconds_from_midnight() as f32);
                     }
 
                     let mut stop_lat = None;
@@ -264,7 +261,7 @@ async fn snapshot(
                                     let seconds = (&record_fmt[6..=7]).parse::<u32>().unwrap();
                                     // println!("{}:{}:{} = {}", hours, minutes, seconds, hours*3600+minutes*60+seconds);
 
-                                    arrival_time = Some(hours*3600+minutes*60+seconds as f32);
+                                    arrival_time = Some((hours*3600+minutes*60+seconds) as f32);
                                     // arrival_time = Some(NaiveTime::parse_from_str(
                                     //     &*record_fmt, "%H:%M:%S"
                                     // ).unwrap().num_seconds_from_midnight() as f32);
@@ -276,17 +273,80 @@ async fn snapshot(
                             .unwrap().weekday();
                         // println!("{:?} {:?}", trip.trip_id, vehicle.stop_id);
 
-                        trd.vehicle_id.push(vehicle_descrp.id.as_ref().unwrap().parse::<f32>().unwrap());
-                        trd.is_weekend.push(if weekday == Weekday::Sat || weekday == Weekday::Sun {1.0f32} else {0.0f32});
-                        trd.latitude.push(position.latitude);
-                        trd.longitude.push(position.longitude);
-                        trd.bearing.push(position.bearing);
-                        trd.speed.push(position.speed.unwrap());
-                        trd.current_time.push(arrival_seconds.unwrap());
-                        trd.stop_lat.push(stop_lat.unwrap());
-                        trd.stop_lon.push(stop_lon.unwrap());
-                        trd.arrival_time.push(arrival_time.unwrap());
-                        trd.actual_arrival_time.push(vehicle.current_status.unwrap() as f32);
+                        if let Some(1) = vehicle.current_status { // current status: stopped_at
+                            // search for all empty actual arrival time for that vehicle id and fill in the current time
+
+                            main_df = main_df
+                                .lazy()
+                                .with_column(
+                                    when(
+                                        col("vehicle_id").eq(lit(vehicle_descrp.id.as_ref().unwrap().parse::<f32>().unwrap()))
+                                            .and(col("actual_arrival_time").eq(lit(Null {})))
+                                    )
+                                        .then(lit(timestamp_seconds.unwrap()))  // final actual arrival time propogate immediately to all previous null value of this vehID
+                                        // .when(col("vehicle_id").eq(lit(vehicle_descrp.id.as_ref().unwrap().parse::<f32>().unwrap())))
+                                        // .then(col("actual_arrival_time")+lit(1.0))  // testing out mutation
+                                        .otherwise(col("actual_arrival_time"))  // do nothing
+                                        .alias("actual_arrival_time")
+                                )
+                                .collect().unwrap();
+
+                            // println!("{:?}");
+
+                            // let mut temp_df = main_df
+                            //     .filter(
+                            //         &main_df
+                            //             .column("vehicle_id").unwrap()
+                            //             .equal(vehicle_descrp.id.as_ref().unwrap().parse::<f32>().unwrap()).unwrap()
+                            //     ).unwrap();
+                            // let updated_actual_arrival_time = temp_df
+                            //     .apply("actual_arrival_time", |series: &Series| {
+                            //         series
+                            //             .f32().unwrap()
+                            //             .into_iter()
+                            //             .map(|val: Option<f32>| {
+                            //                 if let Some(val) = val {
+                            //                     Some(val+1.0)
+                            //                 } else {
+                            //                     Some(100.0)
+                            //                 }
+                            //                 // println!("{:?} {:?}", vehicle_descrp.id, val);
+                            //                 // val+1
+                            //                 // if let Some(val) = val { Some(val) }
+                            //                 // else { Some(-666.0f32) }
+                            //             })
+                            //             .collect::<Float32Chunked>()
+                            //             .into_series()
+                            //     }).unwrap()
+                            //     .column("actual_arrival_time").unwrap();
+
+                            // println!("{:?} {:?}", vehicle_descrp.id, updated_actual_arrival_time);
+                            // main_df.with_column(updated_actual_arrival_time).unwrap();
+
+                            trd.vehicle_id.push(vehicle_descrp.id.as_ref().unwrap().parse::<f32>().unwrap());
+                            trd.is_weekend.push(if weekday == Weekday::Sat || weekday == Weekday::Sun {1.0f32} else {0.0f32});
+                            trd.latitude.push(position.latitude);
+                            trd.longitude.push(position.longitude);
+                            trd.bearing.push(position.bearing);
+                            trd.speed.push(position.speed.unwrap());
+                            trd.current_time.push(timestamp_seconds.unwrap());
+                            trd.stop_lat.push(stop_lat.unwrap());
+                            trd.stop_lon.push(stop_lon.unwrap());
+                            trd.arrival_time.push(arrival_time.unwrap());
+                            trd.actual_arrival_time.push(Some(timestamp_seconds.unwrap()));  // if *still* at stop: timestamp == actual arrival time
+                        } else {
+                            trd.vehicle_id.push(vehicle_descrp.id.as_ref().unwrap().parse::<f32>().unwrap());
+                            trd.is_weekend.push(if weekday == Weekday::Sat || weekday == Weekday::Sun {1.0f32} else {0.0f32});
+                            trd.latitude.push(position.latitude);
+                            trd.longitude.push(position.longitude);
+                            trd.bearing.push(position.bearing);
+                            trd.speed.push(position.speed.unwrap());
+                            trd.current_time.push(timestamp_seconds.unwrap());
+                            trd.stop_lat.push(stop_lat.unwrap());
+                            trd.stop_lon.push(stop_lon.unwrap());
+                            trd.arrival_time.push(arrival_time.unwrap());
+                            trd.actual_arrival_time.push(None);
+                        }
 
                         // writer.serialize(TrainingRowDataOld {
                         //     vehicle_id: Some(vehicle_descrp.id.as_ref().unwrap().parse::<f32>().unwrap()),
@@ -308,5 +368,5 @@ async fn snapshot(
         }
     }
 
-    Ok(())
+    Ok(main_df)
 }
