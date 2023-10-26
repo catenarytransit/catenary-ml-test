@@ -176,7 +176,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut main_df = TrainingRowData::dataframe_empty()?;
     let mut trd = TrainingRowData::default();
 
-    let mut stop_locs = csv::Reader::from_path("gtfs_static/la_bus/stops.txt")?;
+    let mut stop_locs = csv::Reader::from_path("stops.txt")?;
     let stop_times_file = File::open("raw_static_data_mapper/la_stop_times_indexed.txt")?;
     let stop_times: HashMap<String, Vec<(String, String)>> = serde_json::from_reader(stop_times_file)?;
 
