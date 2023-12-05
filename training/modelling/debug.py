@@ -1,0 +1,4 @@
+DEBUG_NSFM = False
+DEBUG_PSO_SPARSE = True
+DEBUG_PSO = False
+DEBUG_RBF = False

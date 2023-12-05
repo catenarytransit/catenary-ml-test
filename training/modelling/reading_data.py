@@ -7,7 +7,7 @@ SHUFFLE = False
 
 def read_data() -> (pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame):
     df = pd.read_csv("../one_hour_data.csv").dropna(axis=0)  # for no actual arrival time
-    df = df.drop(["vehicle_id"], axis=1)
+    df = df.drop(["vehicle_id", "is_weekend"], axis=1)
 
     X = df.drop(["actual_arrival_time"], axis=1)
     y = df["actual_arrival_time"]
