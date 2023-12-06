@@ -6,11 +6,16 @@ from sklearn.model_selection import train_test_split
 SHUFFLE = False
 
 def read_data() -> (pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame):
-    df = pd.read_csv("../one_hour_data.csv").dropna(axis=0)  # for no actual arrival time
-    df = df.drop(["vehicle_id", "is_weekend"], axis=1)
+    training_csv = pd.read_csv("../eleven_hour_data.csv")
+    trimmed_training_csv = training_csv.loc[training_csv["vehicle_id"] == 5817.0][0:1000]
+    # print(trimmed_training_csv)
+    print("TRAINING DATA SIZE: ", len(trimmed_training_csv))
 
-    X = df.drop(["actual_arrival_time"], axis=1)
-    y = df["actual_arrival_time"]
+    trimmed_training_csv = trimmed_training_csv.dropna(axis=0)  # for no actual arrival time
+    trimmed_training_csv = trimmed_training_csv.drop(["vehicle_id", "is_weekend"], axis=1)
+
+    X = trimmed_training_csv.drop(["actual_arrival_time"], axis=1)
+    y = trimmed_training_csv["actual_arrival_time"]
 
     X_train_val, X_test, y_train_val, y_test = train_test_split(X, y, test_size=0.25, shuffle=SHUFFLE)
     X_train, X_val, y_train, y_val = train_test_split(X_train_val, y_train_val, test_size=0.25, shuffle=SHUFFLE)

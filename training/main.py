@@ -11,7 +11,7 @@ training_csv.drop(["stop_lat", "stop_lon", "latitude", "longitude"], axis=1, inp
 print(len(training_csv))
 
 #[0:1000]  #
-data = training_csv.loc[training_csv["vehicle_id"] == 5817.0][0:30]
+data = training_csv.loc[training_csv["vehicle_id"] == 5817.0][0:1000]
 
 # rows = len(data)//ROW_DATA_SIZE + 1
 # fig, axs = plt.subplots(nrows=rows)
@@ -19,7 +19,7 @@ data = training_csv.loc[training_csv["vehicle_id"] == 5817.0][0:30]
 # for i in range(0, rows):
 #     data_inp = data[i*ROW_DATA_SIZE:i*ROW_DATA_SIZE+ROW_DATA_SIZE]
 #
-sns.pairplot(data, hue="actual_arrival_time")
+sns.pairplot(data) #, hue="actual_arrival_time")
 plt.show()
 
 # while (inp := input(">> ").upper()) != "QUIT":

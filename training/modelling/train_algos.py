@@ -4,7 +4,7 @@ from typing import Optional
 import numpy as np
 import pandas as pd
 
-from modelling.debug import DEBUG_NSFM, DEBUG_RBF, DEBUG_PSO, DEBUG_PSO_SPARSE
+from modelling.debug import DEBUG_NSFM, DEBUG_RBF, DEBUG_PSO, DEBUG_PSO_SPARSE, DEBUG_NSFM_SPARSE, DEBUG_RBF_SPARSE
 
 """
 https://ieeexplore.ieee.org/document/6395832
@@ -25,7 +25,7 @@ def nsfm_algorithm(*, U_train, Y_train, s: np.ndarray) -> (int, list[list[int]])
         L: number of selected RBF centers
         U: selected RBF center locations
     """
-    if DEBUG_NSFM: print(f"NSFM ALGORITHM >> PARTITION: {s}")
+    if DEBUG_NSFM_SPARSE: print(f"NSFM ALGORITHM >> PARTITION: {s}")
 
     N = len(s)
     L = 1  # prepare calculating the first RBF center (0-INDEXED)
@@ -63,7 +63,7 @@ def nsfm_algorithm(*, U_train, Y_train, s: np.ndarray) -> (int, list[list[int]])
 
     k: int  # data point
     for k in range(2, len(U_train)+1):  # for each data point (k=1 has been done by initialization on previous loop)
-        # print(f"DATA POINT [{k}]")
+        if k%1000 == 0 and DEBUG_NSFM_SPARSE: print(f"DATA POINT [{k}]")
 
         # if data point k lies outside the hyper-ellipses defined by the already selected center
         if min([subspace_input_distance(U_train[k-1], l=l, N=N, a=u_hat, delta_a=delta_a) for l in range(1, L+1)]) > 1:
@@ -100,11 +100,14 @@ class RBFNetwork:
 
     def forward(self, u_k) -> np.ndarray:
         # hidden node response
-        if DEBUG_RBF: print([
-                self.u_hat[l-1]
+        if DEBUG_RBF and False:
+            l = [
+                self.activation(self.mu_l(u_k, self.u_hat[l-1]))
                 for l in range(1, self.L+1)
-            ])
-        self.z_k = np.ndarray(
+            ]
+            print(np.array(l))
+            print(np.array(l).shape)
+        self.z_k = np.array(
             [
                 self.activation(self.mu_l(u_k, self.u_hat[l-1]))
                 for l in range(1, self.L+1)
@@ -113,11 +116,21 @@ class RBFNetwork:
         return np.dot(self.z_k, self.w)
 
     def train(self, U_train, Y_train: np.ndarray):
-        Z = np.array([])
+        Z = np.full((1, self.L), np.nan)
         for u_k in U_train:
             self.forward(u_k)
-            Z.apppend(self.z_k)
+            if DEBUG_RBF and False: print(f"{u_k.shape} {self.z_k.shape} {Z.shape}")
+
+            Z = np.concatenate((Z, self.z_k.reshape((1,-1))), axis=0)
+        Z = Z[1:]  # remove the initial array
         Z_T = np.transpose(Z)
+
+        if DEBUG_RBF_SPARSE: print("RBF TRAIN")
+        if DEBUG_RBF:
+            print(Y_train.shape)
+            print(np.transpose(Y_train).shape)
+            print(U_train.shape)
+            print(Z.shape)
 
         self.w = (np.transpose(Y_train) @ Z_T) @ np.linalg.inv(Z @ Z_T)
 
@@ -178,33 +191,35 @@ def pso_algorithm(U_train: np.ndarray, Y_train: np.ndarray, U_val: np.ndarray, Y
 
         # create the RBF-NN network
         for i in range(1, P+1):
-            if DEBUG_PSO: print(f"PARTICLE <{i}>")
+            if DEBUG_PSO_SPARSE: print(f"PARTICLE <{i}>")
 
-            L[i], U_hat[i] = nsfm_algorithm(U_train=U_train, Y_train=Y_train, s=s[i])
-            if DEBUG_PSO_SPARSE: print(f"-- NSFM RBF-NN GENERATION >> NUMBER OF CENTER: <{L[i]}> RBF CENTER LOCATION: {U_hat[i]}")
+            L[i-1], U_hat[i-1] = nsfm_algorithm(U_train=U_train, Y_train=Y_train, s=s[i-1])
+            if DEBUG_PSO_SPARSE: print(f"-- NSFM RBF-NN GENERATION >> NUMBER OF CENTER: <{L[i-1]}>"+f"RBF CENTER LOCATION: {U_hat[i-1]}" if L[i-1] < 10 else "")
 
             # calculate the synaptic weights
-            rbf = RBFNetwork(u_hat=U_hat[i], L=L[i], N=N)
+            rbf = RBFNetwork(u_hat=U_hat[i-1], L=L[i-1], N=N)
             rbf.train(U_train=U_train, Y_train=Y_train)
-            w[i] = rbf.w
+            w[i-1] = rbf.w
 
             # calculate fitness function and update personal/global best positions if needed
-            U_pred = np.array([])
+            U_val_pred = np.array([])
             for u_k in U_val:
-                U_pred.append(rbf.forward(u_k), axis=0)
+                U_val_pred = np.concatenate((U_val_pred, [rbf.forward(u_k)]), axis=0)
 
-            f_x_i = f(U_pred)
+            # print("VAL", Y_val)
+
+            f_x_i = f(U_val_pred)
             #  f(x_i(t+1)) >=  f(y_i(t))
-            if f_x_i >= s_f[i]:
+            if f_x_i >= s_f[i-1]:
                 # y_i(t+1) = y_i
                 # i.e. do nothing
                 pass
             else:
                 # new personal best position
-                s_f[i] = f_x_i
-                y_f[i] = s[i]
+                s_f[i-1] = f_x_i
+                y_f[i-1] = s[i-1]
 
-        f_min_ind = s_f.index(min(s_f))
+        f_min_ind = list(s_f).index(min(s_f))
         y_hat_f = y_f[f_min_ind]  # gets the first y_f if same fitness value
         L_f = L[f_min_ind]
         U_hat_f = U_hat[f_min_ind]
@@ -216,12 +231,12 @@ def pso_algorithm(U_train: np.ndarray, Y_train: np.ndarray, U_val: np.ndarray, Y
         for i in range(1, P+1):
             for j in range(1, N+1):
                 # update the velocity vector
-                v[i][j] = round(v[i][j] + c_1*r_1[j]*(y_f[i][j]-s[i][j]) + c_2*r_2[j]*(y_hat_f[j]-s[i][j]))
+                v[i-1][j-1] = round(v[i-1][j-1] + c_1*r_1[j-1]*(y_f[i-1][j-1]-s[i-1][j-1]) + c_2*r_2[j-1]*(y_hat_f[j-1]-s[i-1][j-1]))
 
                 # perform velocity clamping
-                v[i][j] = v[i][j] if abs(v[i][j]) < V_max else (abs(v[i][j])/v[i][j])*V_max
+                v[i-1][j-1] = v[i-1][j-1] if abs(v[i-1][j-1]) < V_max else (abs(v[i-1][j-1])/v[i-1][j-1])*V_max
             # update particle position
-            s[i] = s[i] + v[i]
+            s[i-1] = s[i-1] + v[i-1]
 
         if t == 1: R_max_1 = np.max(np.linalg.norm(s-y_hat_f, axis=1))
         R_max_t = np.max(np.linalg.norm(s-y_hat_f, axis=1))
